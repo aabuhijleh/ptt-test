@@ -13,10 +13,10 @@ function createWindow() {
   });
 
   // and load the index.html of the app.
-  mainWindow.loadFile(path.join(__dirname, "../index.html"));
+  mainWindow.loadURL("https://web.openrainbow.com");
 
   // Open the DevTools.
-  // mainWindow.webContents.openDevTools()
+  mainWindow.webContents.openDevTools();
 }
 
 // This method will be called when Electron has finished

@@ -20,3 +20,6 @@
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+/push-to-talk/build/**/*
+/push-to-talk/node_modules/**/*

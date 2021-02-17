@@ -1,12 +1,20 @@
-// All of the Node.js APIs are available in the preload process.
-// It has the same sandbox as a Chrome extension.
-window.addEventListener("DOMContentLoaded", () => {
-  const replaceText = (selector: string, text: string) => {
-    const element = document.getElementById(selector);
-    if (element) element.innerText = text;
-  };
+import pushToTalk from "push-to-talk";
+import { stripUnicode } from "./utils/stripUnicode";
 
-  for (const type of ["chrome", "node", "electron"]) {
-    replaceText(`${type}-version`, process.versions[type]);
-  }
-});
+type KeyEvent = { key: string; type: string };
+
+(window as any).pushToTalk = {
+  start: (callback: (KeyEvent: KeyEvent) => void) => {
+    console.log("pushToTalk - start");
+    pushToTalk.start((key, isKeyUp) => {
+      callback({
+        key: stripUnicode(key),
+        type: isKeyUp ? "up" : "down",
+      });
+    });
+  },
+  stop: () => {
+    console.log("pushToTalk - stop");
+    pushToTalk.stop();
+  },
+};
