@@ -1,4 +1,4 @@
-# Electron TypeScript Quick Start
+# push to talk native module bug bash
 
 > This template is based on the official [electron-quick-start](https://github.com/electron/electron-quick-start) repository **+ TypeScript + electron-builder**
 
