@@ -66,23 +66,23 @@ void Start(const Napi::CallbackInfo &info) {
                                   LPARAM lParam) -> LRESULT {
       try {
         if (nCode >= 0 && tsfn) {
-          // the action is valid: HC_ACTION.
-          if (wParam == WM_KEYDOWN || wParam == WM_KEYUP) {
-            // lParam is the pointer to the struct containing the data needed,
-            // so cast and assign it to kdbStruct.
-            kbdStruct = *((KBDLLHOOKSTRUCT *)lParam);
+          // the action is valid: HC_ACTION and tsfn is not released.
 
-            // call the JS callback with the key input value and type
-            napi_status status = tsfn.BlockingCall(
-                [=](Napi::Env env, Napi::Function jsCallback) {
-                  jsCallback.Call(
-                      {Napi::String::New(
-                           env, ConvertKeyCodeToString(kbdStruct.vkCode)),
-                       Napi::Boolean::New(env, wParam == WM_KEYUP)});
-                });
-            if (status != napi_ok) {
-              std::cout << "Failed to execute BlockingCall!" << std::endl;
-            }
+          // lParam is the pointer to the struct containing the data needed,
+          // so cast and assign it to kdbStruct.
+          kbdStruct = *((KBDLLHOOKSTRUCT *)lParam);
+
+          // call the JS callback with the key input value and type
+          napi_status status =
+              tsfn.BlockingCall([=](Napi::Env env, Napi::Function jsCallback) {
+                jsCallback.Call(
+                    {Napi::String::New(
+                         env, ConvertKeyCodeToString(kbdStruct.vkCode)),
+                     Napi::Boolean::New(env, wParam == WM_KEYUP ||
+                                                 wParam == WM_SYSKEYUP)});
+              });
+          if (status != napi_ok) {
+            std::cout << "Failed to execute BlockingCall!" << std::endl;
           }
         }
       } catch (...) {
