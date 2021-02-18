@@ -59,7 +59,11 @@ void Start(const Napi::CallbackInfo &info) {
         nativeThread.join();
       });
 
+  std::cout << "Creating a native thread" << std::endl;
+
   nativeThread = std::thread([] {
+    std::cout << "We are inside the native thread" << std::endl;
+
     // This is the callback function. Consider it the event that is raised when,
     // in this case, a key is pressed or released.
     static auto HookCallback = [](int nCode, WPARAM wParam,
@@ -104,6 +108,8 @@ void Start(const Napi::CallbackInfo &info) {
       std::cout << "Failed to install hook!" << std::endl;
     }
 
+    std::cout << "Now creating the native thread's message loop" << std::endl;
+
     // Create a message loop
     MSG msg;
     BOOL bRet;
@@ -122,16 +128,21 @@ void Start(const Napi::CallbackInfo &info) {
 }
 
 // Called from JS to release the TSFN and stop listening to keyboard events
-void Stop(const Napi::CallbackInfo &info) { ReleaseTSFN(); }
+void Stop(const Napi::CallbackInfo &info) {
+  std::cout << "Stop!!!" << std::endl;
+  ReleaseTSFN();
+}
 
 // Release the TSFN
 void ReleaseTSFN() {
+  std::cout << "ReleaseTSFN!!!" << std::endl;
   if (tsfn) {
     napi_status status = tsfn.Release();
     if (status != napi_ok) {
       std::cout << "Failed to release the TSFN!" << std::endl;
     }
     tsfn = NULL;
+    std::cout << "TSFN Released!!!" << std::endl;
   }
 }
 
