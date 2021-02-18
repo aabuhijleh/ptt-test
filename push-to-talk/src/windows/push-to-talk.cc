@@ -99,6 +99,7 @@ void Start(const Napi::CallbackInfo &info) {
     while ((bRet = GetMessage(&msg, NULL, 0, 0)) != 0) {
       if (bRet == -1) {
         // handle the error and possibly exit
+        std::cout << "some error occurred in the message loop" << std::endl;
       } else if (msg.message == STOP_MESSAGE) {
         PostQuitMessage(0);
       } else {
@@ -215,16 +216,9 @@ std::string ConvertKeyCodeToString(int key_stroke) {
     if (key_stroke >= VK_F1 && key_stroke <= VK_F20) {
       output << "F" << (key_stroke - VK_F1 + 1);
     } else {
-      HWND foreground = GetForegroundWindow();
-      DWORD threadID;
-      HKL layout = NULL;
-      if (foreground) {
-        // get keyboard layout of the thread
-        threadID = GetWindowThreadProcessId(foreground, NULL);
-        layout = GetKeyboardLayout(threadID);
-      }
       // map virtual key according to keyboard layout
-      char key = MapVirtualKeyExA(key_stroke, MAPVK_VK_TO_CHAR, layout);
+      char key =
+          MapVirtualKeyExA(key_stroke, MAPVK_VK_TO_CHAR, GetKeyboardLayout(0));
       output << char(key);
     }
   }
