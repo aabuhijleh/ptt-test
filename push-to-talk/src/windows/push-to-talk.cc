@@ -45,19 +45,8 @@ void Start(const Napi::CallbackInfo &info) {
       info[0].As<Napi::Function>(), // JavaScript function called asynchronously
       "Keyboard Events",            // Name
       0,                            // Unlimited queue
-      1,                            // Only one thread will use this initially
-      [](Napi::Env) {               // Finalizer used to clean threads up
-        std::cout << "Clean up function called" << std::endl;
-
-        // send a message to the native thread to quit
-        PostThreadMessageA(GetThreadId(nativeThread.native_handle()),
-                           STOP_MESSAGE, NULL, NULL);
-
-        std::cout << "nativeThread.joinable() returned: "
-                  << nativeThread.joinable() << std::endl;
-
-        nativeThread.join();
-      });
+      1                             // Only one thread will use this initially
+  );
 
   std::cout << "Creating a native thread" << std::endl;
 
@@ -142,7 +131,23 @@ void ReleaseTSFN() {
       std::cout << "Failed to release the TSFN!" << std::endl;
     }
     tsfn = NULL;
-    std::cout << "TSFN Released!!!" << std::endl;
+
+    std::cout << "TSFN Released :)" << std::endl;
+
+    std::cout << "Cleaning up native thread..." << std::endl;
+
+    // send a message to the native thread to quit
+    PostThreadMessageA(GetThreadId(nativeThread.native_handle()), STOP_MESSAGE,
+                       NULL, NULL);
+
+    std::cout << "nativeThread.joinable() returned: " << nativeThread.joinable()
+              << std::endl;
+
+    if (nativeThread.joinable()) {
+      nativeThread.join();
+
+      std::cout << "nativeThread join done :)" << std::endl;
+    }
   }
 }
 
