@@ -14,8 +14,14 @@ $ cd electron-typescript-quick-start
 # Install dependencies
 $ npm install
 
+# Compile the TypeScript
+$ npm run build
+
 # Run the app
 $ npm start
+
+# Rebuild native modules
+$ npm run build-native
 
 # For distribution
 $ npm run package

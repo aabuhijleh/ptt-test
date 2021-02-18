@@ -7,9 +7,9 @@
     "build": "tsc",
     "watch": "tsc -w",
     "start": "electron .",
-    "prestart": "npm run build",
+    "build-native": "electron-builder install-app-deps",
     "package": "npm run build && electron-builder build",
-    "postinstall": "electron-builder install-app-deps",
+    "postinstall": "npm run build-native",
     "lint": "eslint src/**/*.ts --quiet --fix",
     "clean": "rimraf ./dist ./release"
   },

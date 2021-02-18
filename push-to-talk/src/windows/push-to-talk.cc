@@ -6,9 +6,14 @@
 #include <string>
 #include <thread>
 
+// The TSFN is used to bridge the C++ world and the JS world
 Napi::ThreadSafeFunction tsfn;
+
+// A native thread with its own message loop is needed to attach low level
+// keyboard hooks in order not to block the main thread
 std::thread nativeThread;
 
+// custom message sent to the native thread to signal it to quit
 const UINT STOP_MESSAGE = WM_USER + 1;
 
 // variable to store the HANDLE to the hook. Don't declare it anywhere else then
@@ -23,7 +28,9 @@ KBDLLHOOKSTRUCT kbdStruct;
 void ReleaseTSFN();
 std::string ConvertKeyCodeToString(int key_stroke);
 
-// Trigger the JS callback when a key is pressed
+// Called from JS with a callback as an argument. It should call the JS callback
+// from inside the native thread when reciving a keyboard input event
+// jsCallback: (key: string, isKeyUp: boolean) => void
 void Start(const Napi::CallbackInfo &info) {
   Napi::Env env = info.Env();
 
@@ -40,11 +47,11 @@ void Start(const Napi::CallbackInfo &info) {
       0,                            // Unlimited queue
       1,                            // Only one thread will use this initially
       [](Napi::Env) {               // Finalizer used to clean threads up
+        // send a message to the native thread to quit
         PostThreadMessageA(GetThreadId(nativeThread.native_handle()),
                            STOP_MESSAGE, NULL, NULL);
-        if (nativeThread.joinable()) {
-          nativeThread.join();
-        }
+        std::cout << "joinable: " << nativeThread.joinable() << std::endl;
+        nativeThread.join();
       });
 
   nativeThread = std::thread([] {
@@ -59,6 +66,7 @@ void Start(const Napi::CallbackInfo &info) {
           // cast and assign it to kdbStruct.
           kbdStruct = *((KBDLLHOOKSTRUCT *)lParam);
 
+          // call the JS callback with the key input value and type
           napi_status status =
               tsfn.BlockingCall([=](Napi::Env env, Napi::Function jsCallback) {
                 jsCallback.Call({Napi::String::New(env, ConvertKeyCodeToString(
@@ -101,21 +109,21 @@ void Start(const Napi::CallbackInfo &info) {
   });
 }
 
+// Called from JS to release the TSFN and stop listening to keyboard events
 void Stop(const Napi::CallbackInfo &info) { ReleaseTSFN(); }
 
+// Release the TSFN
 void ReleaseTSFN() {
   if (tsfn) {
-    // Release the TSFN
     napi_status status = tsfn.Release();
     if (status != napi_ok) {
       std::cout << "Failed to release the TSFN!" << std::endl;
     }
-
     tsfn = NULL;
   }
 }
 
-// Try to match web values
+// Convert vkeyCode to string that matches these browser values
 // https://developer.mozilla.org/en-US/docs/Web/API/KeyboardEvent/key/Key_Values
 std::string ConvertKeyCodeToString(int key_stroke) {
   if ((key_stroke == 1) || (key_stroke == 2)) {
@@ -123,15 +131,6 @@ std::string ConvertKeyCodeToString(int key_stroke) {
   }
 
   std::stringstream output;
-  HWND foreground = GetForegroundWindow();
-  DWORD threadID;
-  HKL layout = NULL;
-
-  if (foreground) {
-    // get keyboard layout of the thread
-    threadID = GetWindowThreadProcessId(foreground, NULL);
-    layout = GetKeyboardLayout(threadID);
-  }
 
   switch (key_stroke) {
   case VK_MENU:
@@ -216,6 +215,14 @@ std::string ConvertKeyCodeToString(int key_stroke) {
     if (key_stroke >= VK_F1 && key_stroke <= VK_F20) {
       output << "F" << (key_stroke - VK_F1 + 1);
     } else {
+      HWND foreground = GetForegroundWindow();
+      DWORD threadID;
+      HKL layout = NULL;
+      if (foreground) {
+        // get keyboard layout of the thread
+        threadID = GetWindowThreadProcessId(foreground, NULL);
+        layout = GetKeyboardLayout(threadID);
+      }
       // map virtual key according to keyboard layout
       char key = MapVirtualKeyExA(key_stroke, MAPVK_VK_TO_CHAR, layout);
       output << char(key);
@@ -225,6 +232,7 @@ std::string ConvertKeyCodeToString(int key_stroke) {
   return output.str();
 }
 
+// Declare JS functions and map them to native functions
 Napi::Object Init(Napi::Env env, Napi::Object exports) {
   exports.Set(Napi::String::New(env, "start"), Napi::Function::New(env, Start));
   exports.Set(Napi::String::New(env, "stop"), Napi::Function::New(env, Stop));
