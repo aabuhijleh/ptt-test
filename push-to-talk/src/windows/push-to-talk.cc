@@ -47,36 +47,47 @@ void Start(const Napi::CallbackInfo &info) {
       0,                            // Unlimited queue
       1,                            // Only one thread will use this initially
       [](Napi::Env) {               // Finalizer used to clean threads up
+        std::cout << "Clean up function called" << std::endl;
+
         // send a message to the native thread to quit
         PostThreadMessageA(GetThreadId(nativeThread.native_handle()),
                            STOP_MESSAGE, NULL, NULL);
-        std::cout << "joinable: " << nativeThread.joinable() << std::endl;
+
+        std::cout << "nativeThread.joinable() returned: "
+                  << nativeThread.joinable() << std::endl;
+
         nativeThread.join();
       });
 
   nativeThread = std::thread([] {
     // This is the callback function. Consider it the event that is raised when,
-    // in this case, a key is pressed.
+    // in this case, a key is pressed or released.
     static auto HookCallback = [](int nCode, WPARAM wParam,
                                   LPARAM lParam) -> LRESULT {
-      if (nCode >= 0 && tsfn) {
-        // the action is valid: HC_ACTION.
-        if (wParam == WM_KEYDOWN || wParam == WM_KEYUP) {
-          // lParam is the pointer to the struct containing the data needed, so
-          // cast and assign it to kdbStruct.
-          kbdStruct = *((KBDLLHOOKSTRUCT *)lParam);
+      try {
+        if (nCode >= 0 && tsfn) {
+          // the action is valid: HC_ACTION.
+          if (wParam == WM_KEYDOWN || wParam == WM_KEYUP) {
+            // lParam is the pointer to the struct containing the data needed,
+            // so cast and assign it to kdbStruct.
+            kbdStruct = *((KBDLLHOOKSTRUCT *)lParam);
 
-          // call the JS callback with the key input value and type
-          napi_status status =
-              tsfn.BlockingCall([=](Napi::Env env, Napi::Function jsCallback) {
-                jsCallback.Call({Napi::String::New(env, ConvertKeyCodeToString(
-                                                            kbdStruct.vkCode)),
-                                 Napi::Boolean::New(env, wParam == WM_KEYUP)});
-              });
-          if (status != napi_ok) {
-            std::cout << "Failed to execute BlockingCall!" << std::endl;
+            // call the JS callback with the key input value and type
+            napi_status status = tsfn.BlockingCall(
+                [=](Napi::Env env, Napi::Function jsCallback) {
+                  jsCallback.Call(
+                      {Napi::String::New(
+                           env, ConvertKeyCodeToString(kbdStruct.vkCode)),
+                       Napi::Boolean::New(env, wParam == WM_KEYUP)});
+                });
+            if (status != napi_ok) {
+              std::cout << "Failed to execute BlockingCall!" << std::endl;
+            }
           }
         }
+      } catch (...) {
+        std::cerr << "something went wrong while handling the key event"
+                  << std::endl;
       }
 
       // call the next hook in the hook chain. This is nessecary or your hook

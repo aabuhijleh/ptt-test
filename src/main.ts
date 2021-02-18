@@ -2,6 +2,8 @@
 import { app, BrowserWindow } from "electron";
 import path from "path";
 
+app.allowRendererProcessReuse = false;
+
 function createWindow() {
   // Create the browser window.
   const mainWindow = new BrowserWindow({
