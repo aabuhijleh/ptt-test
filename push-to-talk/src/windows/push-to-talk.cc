@@ -65,6 +65,12 @@ void Start(const Napi::CallbackInfo &info) {
           // so cast and assign it to kdbStruct.
           kbdStruct = *((KBDLLHOOKSTRUCT *)lParam);
 
+          std::cout << "HookCallback is called => key: "
+                    << ConvertKeyCodeToString(kbdStruct.vkCode)
+                    << " - isKeyUp: "
+                    << (wParam == WM_KEYUP || wParam == WM_SYSKEYUP)
+                    << std::endl;
+
           // call the JS callback with the key input value and type
           napi_status status =
               tsfn.BlockingCall([=](Napi::Env env, Napi::Function jsCallback) {
@@ -255,6 +261,9 @@ std::string ConvertKeyCodeToString(int key_stroke) {
 
 // Declare JS functions and map them to native functions
 Napi::Object Init(Napi::Env env, Napi::Object exports) {
+
+  std::cout << "Init module!!!!!!!!!" << std::endl;
+
   exports.Set(Napi::String::New(env, "start"), Napi::Function::New(env, Start));
   exports.Set(Napi::String::New(env, "stop"), Napi::Function::New(env, Stop));
   return exports;
