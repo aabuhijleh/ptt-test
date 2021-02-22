@@ -28,13 +28,41 @@ KBDLLHOOKSTRUCT kbdStruct;
 void ReleaseTSFN();
 std::string ConvertKeyCodeToString(int key_stroke);
 
+// Returns the last Win32 error, in string format. Returns an empty string if
+// there is no error.
+std::string GetLastErrorAsString() {
+  // Get the error message ID, if any.
+  DWORD errorMessageID = ::GetLastError();
+  if (errorMessageID == 0) {
+    return std::string(); // No error message has been recorded
+  }
+
+  LPSTR messageBuffer = nullptr;
+
+  // Ask Win32 to give us the string version of that message ID.
+  // The parameters we pass in, tell Win32 to create the buffer that holds the
+  // message for us (because we don't yet know how long the message string will
+  // be).
+  size_t size = FormatMessageA(
+      FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
+          FORMAT_MESSAGE_IGNORE_INSERTS,
+      NULL, errorMessageID, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+      (LPSTR)&messageBuffer, 0, NULL);
+
+  // Copy the error message into a std::string.
+  std::string message(messageBuffer, size);
+
+  // Free the Win32's string's buffer.
+  LocalFree(messageBuffer);
+
+  return message;
+}
+
 // Called from JS with a callback as an argument. It should call the JS callback
 // from inside the native thread when reciving a keyboard input event
 // jsCallback: (key: string, isKeyUp: boolean) => void
 void Start(const Napi::CallbackInfo &info) {
   Napi::Env env = info.Env();
-
-  std::cout << "Start!!!" << std::endl;
 
   // Stop if already running
   ReleaseTSFN();
@@ -45,14 +73,24 @@ void Start(const Napi::CallbackInfo &info) {
       info[0].As<Napi::Function>(), // JavaScript function called asynchronously
       "Keyboard Events",            // Name
       0,                            // Unlimited queue
-      1                             // Only one thread will use this initially
-  );
+      1,                            // Only one thread will use this initially
+      [](Napi::Env) {               // Finalizer used to clean threads up.
+        DWORD threadId = GetThreadId(nativeThread.native_handle());
+        if (threadId == 0) {
+          std::cerr << "GetThreadId failed: " << GetLastErrorAsString()
+                    << std::endl;
+        }
 
-  std::cout << "Creating a native thread" << std::endl;
+        PostThreadMessageA(threadId, STOP_MESSAGE, NULL, NULL);
+
+        if (nativeThread.joinable()) {
+          nativeThread.join();
+        } else {
+          std::cerr << "Failed to join nativeThread!" << std::endl;
+        }
+      });
 
   nativeThread = std::thread([] {
-    std::cout << "We are inside the native thread" << std::endl;
-
     // This is the callback function. Consider it the event that is raised when,
     // in this case, a key is pressed or released.
     static auto HookCallback = [](int nCode, WPARAM wParam,
@@ -65,12 +103,6 @@ void Start(const Napi::CallbackInfo &info) {
           // so cast and assign it to kdbStruct.
           kbdStruct = *((KBDLLHOOKSTRUCT *)lParam);
 
-          std::cout << "HookCallback is called => key: "
-                    << ConvertKeyCodeToString(kbdStruct.vkCode)
-                    << " - isKeyUp: "
-                    << (wParam == WM_KEYUP || wParam == WM_SYSKEYUP)
-                    << std::endl;
-
           // call the JS callback with the key input value and type
           napi_status status =
               tsfn.BlockingCall([=](Napi::Env env, Napi::Function jsCallback) {
@@ -81,11 +113,11 @@ void Start(const Napi::CallbackInfo &info) {
                                                  wParam == WM_SYSKEYUP)});
               });
           if (status != napi_ok) {
-            std::cout << "Failed to execute BlockingCall!" << std::endl;
+            std::cerr << "Failed to execute BlockingCall!" << std::endl;
           }
         }
       } catch (...) {
-        std::cerr << "something went wrong while handling the key event"
+        std::cerr << "Something went wrong while handling the key event"
                   << std::endl;
       }
 
@@ -100,10 +132,8 @@ void Start(const Napi::CallbackInfo &info) {
     // the callback function is in the same thread and window as the function
     // that sets and releases the hook.
     if (!(_hook = SetWindowsHookEx(WH_KEYBOARD_LL, HookCallback, NULL, 0))) {
-      std::cout << "Failed to install hook!" << std::endl;
+      std::cerr << "Failed to install hook!" << std::endl;
     }
-
-    std::cout << "Now creating the native thread's message loop" << std::endl;
 
     // Create a message loop
     MSG msg;
@@ -111,7 +141,7 @@ void Start(const Napi::CallbackInfo &info) {
     while ((bRet = GetMessage(&msg, NULL, 0, 0)) != 0) {
       if (bRet == -1) {
         // handle the error and possibly exit
-        std::cout << "some error occurred in the message loop" << std::endl;
+        std::cerr << "Some error occurred in the message loop" << std::endl;
       } else if (msg.message == STOP_MESSAGE) {
         PostQuitMessage(0);
       } else {
@@ -123,37 +153,16 @@ void Start(const Napi::CallbackInfo &info) {
 }
 
 // Called from JS to release the TSFN and stop listening to keyboard events
-void Stop(const Napi::CallbackInfo &info) {
-  std::cout << "Stop!!!" << std::endl;
-  ReleaseTSFN();
-}
+void Stop(const Napi::CallbackInfo &info) { ReleaseTSFN(); }
 
 // Release the TSFN
 void ReleaseTSFN() {
-  std::cout << "ReleaseTSFN!!!" << std::endl;
   if (tsfn) {
     napi_status status = tsfn.Release();
     if (status != napi_ok) {
-      std::cout << "Failed to release the TSFN!" << std::endl;
+      std::cerr << "Failed to release the TSFN!" << std::endl;
     }
     tsfn = NULL;
-
-    std::cout << "TSFN Released :)" << std::endl;
-
-    std::cout << "Cleaning up native thread..." << std::endl;
-
-    // send a message to the native thread to quit
-    PostThreadMessageA(GetThreadId(nativeThread.native_handle()), STOP_MESSAGE,
-                       NULL, NULL);
-
-    std::cout << "nativeThread.joinable() returned: " << nativeThread.joinable()
-              << std::endl;
-
-    if (nativeThread.joinable()) {
-      nativeThread.join();
-
-      std::cout << "nativeThread join done :)" << std::endl;
-    }
   }
 }
 
@@ -261,9 +270,6 @@ std::string ConvertKeyCodeToString(int key_stroke) {
 
 // Declare JS functions and map them to native functions
 Napi::Object Init(Napi::Env env, Napi::Object exports) {
-
-  std::cout << "Init module!!!!!!!!!" << std::endl;
-
   exports.Set(Napi::String::New(env, "start"), Napi::Function::New(env, Start));
   exports.Set(Napi::String::New(env, "stop"), Napi::Function::New(env, Stop));
   return exports;
