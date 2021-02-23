@@ -9,9 +9,12 @@
 // The TSFN is used to bridge the C++ world and the JS world
 Napi::ThreadSafeFunction tsfn;
 
-// A native thread with its own message loop is needed to attach low level
-// keyboard hooks in order not to block the main thread
-std::thread nativeThread;
+// Data structure representing our thread-safe function context.
+struct TsfnContext {
+  TsfnContext(Napi::Env env){};
+
+  std::thread nativeThread;
+};
 
 // custom message sent to the native thread to signal it to quit
 const UINT STOP_MESSAGE = WM_USER + 1;
@@ -27,36 +30,12 @@ KBDLLHOOKSTRUCT kbdStruct;
 
 void ReleaseTSFN();
 std::string ConvertKeyCodeToString(int key_stroke);
+std::string GetLastErrorAsString();
 
-// Returns the last Win32 error, in string format. Returns an empty string if
-// there is no error.
-std::string GetLastErrorAsString() {
-  // Get the error message ID, if any.
-  DWORD errorMessageID = ::GetLastError();
-  if (errorMessageID == 0) {
-    return std::string(); // No error message has been recorded
-  }
-
-  LPSTR messageBuffer = nullptr;
-
-  // Ask Win32 to give us the string version of that message ID.
-  // The parameters we pass in, tell Win32 to create the buffer that holds the
-  // message for us (because we don't yet know how long the message string will
-  // be).
-  size_t size = FormatMessageA(
-      FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
-          FORMAT_MESSAGE_IGNORE_INSERTS,
-      NULL, errorMessageID, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
-      (LPSTR)&messageBuffer, 0, NULL);
-
-  // Copy the error message into a std::string.
-  std::string message(messageBuffer, size);
-
-  // Free the Win32's string's buffer.
-  LocalFree(messageBuffer);
-
-  return message;
-}
+// The thread-safe function finalizer callback. This callback executes
+// at destruction of thread-safe function, taking as arguments the finalizer
+// data and threadsafe-function context.
+void FinalizerCallback(Napi::Env env, void *finalizeData, TsfnContext *context);
 
 // Called from JS with a callback as an argument. It should call the JS callback
 // from inside the native thread when reciving a keyboard input event
@@ -67,6 +46,9 @@ void Start(const Napi::CallbackInfo &info) {
   // Stop if already running
   ReleaseTSFN();
 
+  // Construct context data
+  auto contextData = new TsfnContext(env);
+
   // Create a ThreadSafeFunction
   tsfn = Napi::ThreadSafeFunction::New(
       env,
@@ -74,23 +56,14 @@ void Start(const Napi::CallbackInfo &info) {
       "Keyboard Events",            // Name
       0,                            // Unlimited queue
       1,                            // Only one thread will use this initially
-      [](Napi::Env) {               // Finalizer used to clean threads up.
-        DWORD threadId = GetThreadId(nativeThread.native_handle());
-        if (threadId == 0) {
-          std::cerr << "GetThreadId failed: " << GetLastErrorAsString()
-                    << std::endl;
-        }
+      contextData,                  // Context that can be accessed by Finalizer
+      FinalizerCallback,            // Finalizer used to clean threads up
+      (void *)nullptr               // Finalizer data
+  );
 
-        PostThreadMessageA(threadId, STOP_MESSAGE, NULL, NULL);
-
-        if (nativeThread.joinable()) {
-          nativeThread.join();
-        } else {
-          std::cerr << "Failed to join nativeThread!" << std::endl;
-        }
-      });
-
-  nativeThread = std::thread([] {
+  // Create a native thread with its own message loop which is required to
+  // attach low level keyboard hooks in order not to block the main thread
+  contextData->nativeThread = std::thread([] {
     // This is the callback function. Consider it the event that is raised when,
     // in this case, a key is pressed or released.
     static auto HookCallback = [](int nCode, WPARAM wParam,
@@ -266,6 +239,54 @@ std::string ConvertKeyCodeToString(int key_stroke) {
   }
 
   return output.str();
+}
+
+// Returns the last Win32 error, in string format. Returns an empty string if
+// there is no error.
+std::string GetLastErrorAsString() {
+  // Get the error message ID, if any.
+  DWORD errorMessageID = ::GetLastError();
+  if (errorMessageID == 0) {
+    return std::string(); // No error message has been recorded
+  }
+
+  LPSTR messageBuffer = nullptr;
+
+  // Ask Win32 to give us the string version of that message ID.
+  // The parameters we pass in, tell Win32 to create the buffer that holds the
+  // message for us (because we don't yet know how long the message string will
+  // be).
+  size_t size = FormatMessageA(
+      FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
+          FORMAT_MESSAGE_IGNORE_INSERTS,
+      NULL, errorMessageID, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+      (LPSTR)&messageBuffer, 0, NULL);
+
+  // Copy the error message into a std::string.
+  std::string message(messageBuffer, size);
+
+  // Free the Win32's string's buffer.
+  LocalFree(messageBuffer);
+
+  return message;
+}
+
+void FinalizerCallback(Napi::Env env, void *finalizeData,
+                       TsfnContext *context) {
+  DWORD threadId = GetThreadId(context->nativeThread.native_handle());
+  if (threadId == 0) {
+    std::cerr << "GetThreadId failed: " << GetLastErrorAsString() << std::endl;
+  }
+
+  PostThreadMessageA(threadId, STOP_MESSAGE, NULL, NULL);
+
+  if (context->nativeThread.joinable()) {
+    context->nativeThread.join();
+  } else {
+    std::cerr << "Failed to join nativeThread!" << std::endl;
+  }
+
+  delete context;
 }
 
 // Declare JS functions and map them to native functions
